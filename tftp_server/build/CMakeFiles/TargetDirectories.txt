@@ -1,0 +1,3 @@
+/home/seasky/TFTP/tftp_server/build/CMakeFiles/tftp_server.dir
+/home/seasky/TFTP/tftp_server/build/CMakeFiles/edit_cache.dir
+/home/seasky/TFTP/tftp_server/build/CMakeFiles/rebuild_cache.dir
