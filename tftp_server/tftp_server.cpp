@@ -5,6 +5,13 @@
 void* work(void* argv){
     tftp_work tw = *(tftp_work*)argv;
     tftp_server* server = tw.server;
+    auto cleanUp = [&](){
+        if(tw.pfd>=0){
+            close(tw.pfd);
+            tw.pfd = -1;
+        }
+        delete (tftp_work*)argv;
+    };
     //解析客户端的操作码
     unsigned short opcode = static_cast<unsigned short>(tw.buff[0]<<8)|static_cast<unsigned short>(tw.buff[1]&0xff);
     //解析客户端的文件名称    
@@ -12,7 +19,7 @@ void* work(void* argv){
     if(pos==std::string::npos||pos==2){
         ERR_LOG("no filename");
         //send()
-        delete (tftp_work*)argv;
+        cleanUp();
         return nullptr;
     }
     std::string fileName = tw.buff.substr(2,pos-2);
@@ -22,14 +29,14 @@ void* work(void* argv){
     if(pos2==std::string::npos||pos2==pos+1){
         ERR_LOG("no mod:");
         //send()
-        delete (tftp_work*)argv;
+        cleanUp();
         return nullptr;
     }
     std::string mod = tw.buff.substr(pos+1,pos2-(pos+1));
     if(mod!="octet"&&mod!="OCTET"){
         ERR_LOG("mod error:");
         //send()
-        delete (tftp_work*)argv;
+        cleanUp();
         return nullptr;
     }
     
@@ -44,7 +51,7 @@ void* work(void* argv){
         //senderr();
         break;
     }
-    delete (tftp_work*)argv;
+    cleanUp();
 
     return nullptr;
 }
@@ -200,13 +207,17 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
     }
 
     lastPacket = packet;
+    if(fileSize<512){
+        //首包不足512字节时，首包就是最后一个数据包
+        waitForFinaly = true;
+        finalyBlock = nextBlockNum;
+    }
     nextBlockNum++;
 
     while(true){
         std::string rbuff;
         rbuff.resize(BUFF_SIZE);
         int ret=recv(fd,rbuff.data(),BUFF_SIZE,0);
-        rbuff.resize(ret);
         if(ret<0){
             if((errno==EAGAIN||errno==EWOULDBLOCK)&&repeat<=maxRepeat){
                 repeat++;
@@ -225,7 +236,12 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
                 return;
             }
         }
+
         rbuff.resize(ret);
+        if(ret<4){
+            //ACK和ERROR包头至少4字节，短包直接忽略
+            continue;
+        }
 
         repeat = 0;
 
@@ -238,7 +254,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
                 break;
             }
             
-            if(ackBlock==nextBlockNum-1){
+            if(ackBlock==nextBlockNum-1&&waitForFinaly==false){
                 //如果上一次发送的数据块被确认，那么可以发送下一个数据块
                 std::string packet;
                 packet+=char(0);
