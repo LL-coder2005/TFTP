@@ -22,7 +22,7 @@ private:
 private:
     void doReadRequest(int fd,sockaddr_in cin,std::string filePath);
     void doWriteRequest(int fd,sockaddr_in cin,std::string filePath);
-    void sendErr();
+    void sendErr(int fd,sockaddr_in cin,std::string errMsg);
 public:
     
     tftp_server();

@@ -48,7 +48,7 @@ void* work(void* argv){
         server->doWriteRequest(tw.pfd,tw.cin,fullPath);
         break;
     default:
-        //senderr();
+        server->sendErr(tw.pfd,tw.cin,"optcode error");
         break;
     }
     cleanUp();
@@ -321,12 +321,166 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
     }
 
     file.close();
+
+    return;
 }
 
 void tftp_server::doWriteRequest(int fd,sockaddr_in cin,std::string filePath){
+    //判断文件名称是否非空
+    if(filePath.empty()){
+        ERR_LOG("file name is empty");
+        sendErr(fd,cin,"file name is empty");
+        return;
+    }
+    
+    //以二进制创建写的方式打开一个文件
+    std::ofstream file(filePath,std::ios::out|std::ios::binary|std::ios::trunc);
+    if(!file.is_open()){
+        ERR_LOG("file not open");
+        sendErr(fd,cin,"file canot open");
+        return;
+    }
 
+    std::string packet;  //发送的报文段
+    std::string lastPacket; //用于超时重传的数据包
+    const int maxRepeat = 3; //最大重传次数
+    int repeat = 0; //已经重传次数
+    uint16_t expectBlock = 0; //回复的块编号，回复写请求从0开始
+
+    //组装响应报文段
+    packet+=char(0);
+    packet+=char(4);
+    packet+=static_cast<char>(expectBlock>>8);
+    packet+=static_cast<char>(expectBlock&0xff);
+
+    expectBlock++;
+    if(send(fd,packet.data(),packet.size(),0)==-1){
+        ERR_LOG("send error");
+        sendErr(fd,cin,"send error");
+        return;
+    }
+    lastPacket = packet;
+
+    while(true){
+        std::string buff; //接受缓冲区
+        buff.resize(BUFF_SIZE); 
+        int ret = recv(fd,buff.data(),BUFF_SIZE,0);
+        if(ret<0){  
+            //接受不到数据有两种情况，第一种是超时
+            //可以按情况重传
+            if((errno==EAGAIN||errno==EWOULDBLOCK)&&repeat<=maxRepeat){
+                if(send(fd,lastPacket.data(),lastPacket.size(),0)==-1){
+                    ERR_LOG("send error");
+                    sendErr(fd,cin,"send error");
+                    file.close();
+                    return;
+                }
+                //更新已重传次数
+                repeat++;  
+                continue;
+            }
+            else{
+                ERR_LOG("recv error");
+                sendErr(fd,cin,"timeout");
+                file.close();
+                return;
+            }
+        }
+        //即使接受到了数据，也要在判断一下
+        //长度小于4的无数据短包，丢弃
+        if(ret<=4){
+            continue;
+        }
+        //根据实际接受的长度，收缩长度
+        buff.resize(ret); 
+        //解析操作码
+        uint16_t opcode = static_cast<uint16_t>(static_cast<uint8_t>(buff[0])<<8)|static_cast<uint16_t>(static_cast<uint8_t>(buff[1])&0xff);
+        if(opcode==3){
+            //是数据报文，接下来解析块编号
+            uint16_t block = static_cast<uint16_t>(static_cast<uint8_t>(buff[2])<<8)|static_cast<uint16_t>(static_cast<uint8_t>(buff[3])&0xff);
+            if(block==expectBlock){
+                //收到的数据包是期待的数据包
+                file.write(buff.data()+4,buff.size()-4);
+                if(file.bad()){
+                    file.close();
+                    ERR_LOG("file bad");
+                    sendErr(fd,cin,"file not good");
+                    return;
+                }
+                std::string packet;
+                packet+=char(0);
+                packet+=char(4);
+                packet+=static_cast<char>(block>>8);
+                packet+=static_cast<char>(block&0xff);
+
+                if(send(fd,packet.data(),packet.size(),0)==-1){
+                    ERR_LOG("send error ");
+                    file.close();
+                    sendErr(fd,cin,"send error");
+                    return;
+                }
+
+                //如果数据长度小于512+2，说明已经是最后一个数据包
+                if(buff.size()<516){
+                    break;
+                }
+
+                lastPacket = packet;
+                expectBlock++;
+            }
+            else if(block<expectBlock){
+                //是之前的数据包，可能是重传过来的
+                //不写入文件中，但是要发送确认报文段
+                std::string packet;
+                packet+=char(0);
+                packet+=char(4);
+                packet+=static_cast<char>(block>>8);
+                packet+=static_cast<char>(block&0xff);
+
+                if(send(fd,packet.data(),packet.size(),0)==-1){
+                    ERR_LOG("send error ");
+                    file.close();
+                    sendErr(fd,cin,"sendErr");
+                    return;
+                }
+
+            }
+            //异常包
+            else{
+                ERR_LOG("buff error ");
+                file.close();
+                sendErr(fd,cin,"buff error");
+                return;
+            }
+        }else if(opcode==5){
+            std::cerr<<buff<<std::endl;
+            file.close();
+            return;
+        }else{
+            ERR_LOG("opcode error ");
+            file.close();
+            sendErr(fd,cin,"error");
+            return;
+        }
+    }
+    
+    file.close();
+
+    return;
 }
 
-void tftp_server::sendErr(){
+void tftp_server::sendErr(int fd,sockaddr_in cin,std::string errMsg){
+    //组装错误信息报文，发送给客户端
+    std::string errPacket;
+    errPacket+=char(0);
+    errPacket+=char(5);
+    errPacket+=char(0);
+    errPacket+=char(0);
+    errPacket+=errMsg;
+    if(send(fd,errPacket.data(),errPacket.size(),0)==-1){
+        ERR_LOG("errSend error");
+        return;
+    }
 
+    return;
 }

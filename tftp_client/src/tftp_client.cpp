@@ -2,7 +2,7 @@
 #include "myhead.h"
 #include <cerrno>
 #include <limits>
-
+#include <filesystem>
 #define ERR_LOG(msg) do{ \
     perror(msg);\
     cout<<__LINE__<<" "<<__FILE__<<" "<<__func__<<endl;\
@@ -218,6 +218,7 @@ int tftp_client::doDownload()
         }else if(opcode==5){
             cout << (buff_data+4) << endl;
             file.close();
+            
             return -1;
         }else{
             cout << "收到未知操作码: " << opcode << endl;
@@ -388,6 +389,7 @@ int tftp_client::doUpload(){
         }else if(opcode==5){
             cout << (buff+4) << endl;
             file.close();
+            std::filesystem::remove(filename);
             return -1;
         }else{
             cout << "收到未知操作码: " << opcode << endl;
