@@ -108,6 +108,9 @@ int tftp_client::doDownload()
         return -1;
     }
 
+    sockaddr_in requestAddr = sin;
+    socklen_t requestLen = socklen;
+
     uint16_t opcode = htons(1);
     string packet;
     packet.append(reinterpret_cast<const char*>(&opcode),2);
@@ -115,7 +118,7 @@ int tftp_client::doDownload()
     packet+=char(0);
     packet+="octet";
     packet+=char(0);
-    if(sendto(fd,packet.data(),packet.size(),0,(struct sockaddr*)&sin,socklen)==-1){
+    if(sendto(fd,packet.data(),packet.size(),0,(struct sockaddr*)&requestAddr,requestLen)==-1){
         ERR_LOG("sendto error:");
         file.close();
         return -1;
@@ -144,7 +147,9 @@ int tftp_client::doDownload()
                     return -1;
                 }
                 retryCount++;
-                if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(struct sockaddr*)&sin,socklen)==-1){
+                sockaddr_in targetAddr = hasPeer ? peerAddr : requestAddr;
+                socklen_t targetLen = hasPeer ? sizeof(peerAddr) : requestLen;
+                if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(struct sockaddr*)&targetAddr,targetLen)==-1){
                     ERR_LOG("sendto error:");
                     file.close();
                     return -1;
@@ -166,8 +171,6 @@ int tftp_client::doDownload()
 
         if(!hasPeer){
             peerAddr = fromAddr; //用于校验后续数据包是否来自同一地址
-            sin = fromAddr;
-            socklen = fromLen;
             hasPeer = true;
         }else if(fromAddr.sin_addr.s_addr!=peerAddr.sin_addr.s_addr || fromAddr.sin_port!=peerAddr.sin_port){
             // COPILOT-MOD-C4C: TID 不匹配时丢弃，防止串包。
@@ -199,7 +202,7 @@ int tftp_client::doDownload()
             // COPILOT-MOD-C4E: 按网络字节序拆分 block 组装 ACK。
             ackPacket[2] = static_cast<char>((block>>8)&0xff);
             ackPacket[3] = static_cast<char>(block&0xff);
-            if(sendto(fd,ackPacket,4,0,(sockaddr*)&sin,socklen)==-1){
+            if(sendto(fd,ackPacket,4,0,(sockaddr*)&peerAddr,sizeof(peerAddr))==-1){
                 ERR_LOG("sendto error");
                 file.close();
                 return -1;
@@ -262,6 +265,9 @@ int tftp_client::doUpload(){
         return -1;
     }
 
+    sockaddr_in requestAddr = sin;
+    socklen_t requestLen = socklen;
+
     string packet;
     packet+=char(0);
     packet+=char(2);
@@ -269,7 +275,7 @@ int tftp_client::doUpload(){
     packet+=char(0);
     packet+="octet";
     packet+=char(0);
-    if(sendto(fd,packet.c_str(),packet.size(),0,(sockaddr*)&sin,socklen)==-1){
+    if(sendto(fd,packet.c_str(),packet.size(),0,(sockaddr*)&requestAddr,requestLen)==-1){
         ERR_LOG("sendto error");
         file.close();
         return -1;
@@ -299,7 +305,9 @@ int tftp_client::doUpload(){
                     return -1;
                 }
                 retryCount++;
-                if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(sockaddr*)&sin,socklen)==-1){
+                sockaddr_in targetAddr = hasPeer ? peerAddr : requestAddr;
+                socklen_t targetLen = hasPeer ? sizeof(peerAddr) : requestLen;
+                if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(sockaddr*)&targetAddr,targetLen)==-1){
                     ERR_LOG("sendto error");
                     file.close();
                     return -1;
@@ -320,8 +328,6 @@ int tftp_client::doUpload(){
 
         if(!hasPeer){
             peerAddr = fromAddr;
-            sin = fromAddr;
-            socklen = fromLen;
             hasPeer = true;
         }else if(fromAddr.sin_addr.s_addr!=peerAddr.sin_addr.s_addr || fromAddr.sin_port!=peerAddr.sin_port){
             // COPILOT-MOD-C5C: 固定会话对端，非会话端口数据直接丢弃。
@@ -341,7 +347,7 @@ int tftp_client::doUpload(){
                     break;
                 }
                 if(ackBlock<finalBlock){
-                    if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(sockaddr*)&sin,socklen)==-1){
+                    if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(sockaddr*)&peerAddr,sizeof(peerAddr))==-1){
                         ERR_LOG("sendto error");
                         file.close();
                         return -1;
@@ -353,7 +359,7 @@ int tftp_client::doUpload(){
             unsigned short expectedAck = static_cast<unsigned short>(nextBlock-1);
             if(ackBlock!=expectedAck){
                 if(ackBlock<expectedAck){
-                    if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(sockaddr*)&sin,socklen)==-1){
+                    if(sendto(fd,lastSentPacket.data(),lastSentPacket.size(),0,(sockaddr*)&peerAddr,sizeof(peerAddr))==-1){
                         ERR_LOG("sendto error");
                         file.close();
                         return -1;
@@ -373,7 +379,7 @@ int tftp_client::doUpload(){
             streamsize readBytes = file.gcount();
             int sendLen = static_cast<int>(4+readBytes);
 
-            if(sendto(fd,dataPacket,sendLen,0,(sockaddr*)&sin,socklen)==-1){
+            if(sendto(fd,dataPacket,sendLen,0,(sockaddr*)&peerAddr,sizeof(peerAddr))==-1){
                 ERR_LOG("sendto error");
                 file.close();
                 return -1;

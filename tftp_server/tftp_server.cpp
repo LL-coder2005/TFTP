@@ -102,7 +102,7 @@ void tftp_server::run(){
         int ret = recvfrom(sfd,buff.data(),BUFF_SIZE,0,(sockaddr*)&cin,&len);
         if(ret<0){
             ERR_LOG("recvfrom error:");
-            return;
+            continue;
         }
         buff.resize(ret);
         if(buff.size()<=4){
@@ -121,7 +121,7 @@ void tftp_server::run(){
         if(pw.pfd==-1){
             ERR_LOG("pthread socket error : ");
             //sendErr();
-            return;
+            continue;
         }
         timeval timeout;
         timeout.tv_sec = 5;
@@ -130,14 +130,14 @@ void tftp_server::run(){
             ERR_LOG("setsockopt rcvtime error : ");
              //sendErr();
             close(pw.pfd);
-            return;
+            continue;
         }
         //连接客户端
         if(connect(pw.pfd,(sockaddr*)&pw.cin,pw.socklen)==-1){
             ERR_LOG("pthread connect error : ");
             //sendErr();
             close(pw.pfd);
-            return;
+            continue;
         }
         
         tftp_work* pthreadWork = new tftp_work(pw);
@@ -146,13 +146,13 @@ void tftp_server::run(){
             ERR_LOG("pthread_create error:");
             //sendErr();
             delete(pthreadWork);
-            return;
+            continue;
         }
         if(pthread_detach(pthread)==-1){
             ERR_LOG("pthread_detach error:");
             //sendErr();
             delete(pthreadWork);
-            return;
+            continue;
         }
         
     }
@@ -163,7 +163,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
     //先判断文件名是否非空
     if(filePath.empty()){
         ERR_LOG("fileName empty");
-        //send
+        sendErr(fd,cin,"file name is empty");
         return;
     }
     
@@ -171,7 +171,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
     std::ifstream file(filePath,std::ios_base::binary|std::ios_base::in);
     if(!file.is_open()){
         ERR_LOG("file open error:");
-        //send
+        sendErr(fd,cin,"file open error");
         return;
     }
 
@@ -201,7 +201,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
     //向客户端发送数据报
     if(send(fd,packet.c_str(),packet.size(),0)==-1){
         ERR_LOG("pthread send error:");
-        //send
+        sendErr(fd,cin,"file send error");
         file.close();
         return;
     }
@@ -224,7 +224,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
                 if(send(fd,lastPacket.c_str(),lastPacket.size(),0)==-1){
                     ERR_LOG("pthread send error:");
                     file.close();
-                    //send
+                    sendErr(fd,cin,"file send error");
                     return;
                 }
                 continue;
@@ -232,7 +232,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
             else{
                 ERR_LOG("time out :");
                 file.close();
-                //send
+                sendErr(fd,cin,"time out");
                 return;
             }
         }
@@ -271,7 +271,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
                 if(file.bad()){
                     ERR_LOG("file error:");
                     file.close();
-                    //send
+                    sendErr(fd,cin,"file error");
                     return;
                 }
                 std::streamsize fileSize = file.gcount(); //得到实际读取的字节数
@@ -282,7 +282,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
                 if(send(fd,packet.c_str(),packet.size(),0)==-1){
                     ERR_LOG("pthread send error:");
                     file.close();
-                    //send
+                    sendErr(fd,cin,"file send error");
                     return;
                 }
                 lastPacket = packet;
@@ -298,7 +298,7 @@ void tftp_server::doReadRequest(int fd,sockaddr_in cin,std::string filePath){
                 if(send(fd,lastPacket.c_str(),lastPacket.size(),0)==-1){
                     ERR_LOG("pthread send error:");
                     file.close();
-                    //send
+                    sendErr(fd,cin,"file send error");
                     return;
                 }
             }
